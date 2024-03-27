@@ -251,9 +251,10 @@ func (s *Service) createCluster(ctx context.Context, log *logr.Logger) error {
 
 	isRegional := shared.IsRegional(s.scope.Region())
 	cluster := &containerpb.Cluster{
-		Name:       s.scope.ClusterName(),
-		Network:    *s.scope.GCPManagedCluster.Spec.Network.Name,
-		Subnetwork: s.getSubnetNameInClusterRegion(),
+		Name:        s.scope.ClusterName(),
+		Description: s.scope.GCPManagedControlPlane.Spec.Description,
+		Network:     *s.scope.GCPManagedCluster.Spec.Network.Name,
+		Subnetwork:  s.getSubnetNameInClusterRegion(),
 		Autopilot: &containerpb.Autopilot{
 			Enabled: s.scope.GCPManagedControlPlane.Spec.EnableAutopilot,
 		},
@@ -265,6 +266,91 @@ func (s *Service) createCluster(ctx context.Context, log *logr.Logger) error {
 	if s.scope.GCPManagedControlPlane.Spec.ControlPlaneVersion != nil {
 		cluster.InitialClusterVersion = convertToSdkMasterVersion(*s.scope.GCPManagedControlPlane.Spec.ControlPlaneVersion)
 	}
+	if s.scope.GCPManagedControlPlane.Spec.ClusterNetwork != nil {
+		cn := s.scope.GCPManagedControlPlane.Spec.ClusterNetwork
+		if cn.UseIPAliases {
+			cluster.IpAllocationPolicy = &containerpb.IPAllocationPolicy{}
+			cluster.IpAllocationPolicy.UseIpAliases = cn.UseIPAliases
+		}
+		if cn.PrivateCluster != nil {
+			cluster.PrivateClusterConfig = &containerpb.PrivateClusterConfig{}
+			cluster.PrivateClusterConfig.EnablePrivateEndpoint = cn.PrivateCluster.EnablePrivateEndpoint
+			cluster.PrivateClusterConfig.EnablePrivateNodes = cn.PrivateCluster.EnablePrivateNodes
+
+			cluster.PrivateClusterConfig.MasterIpv4CidrBlock = cn.PrivateCluster.ControlPlaneCidrBlock
+			cluster.PrivateClusterConfig.MasterGlobalAccessConfig = &containerpb.PrivateClusterMasterGlobalAccessConfig{
+				Enabled: cn.PrivateCluster.ControlPlaneGlobalAccess,
+			}
+
+			// TODO(Akshay): Set Default SNAT
+		}
+	}
+	if s.scope.GCPManagedControlPlane.Spec.ClusterSecurity != nil {
+		cs := s.scope.GCPManagedControlPlane.Spec.ClusterSecurity
+		if cs.WorkloadIdentityConfig != nil {
+			cluster.WorkloadIdentityConfig = &containerpb.WorkloadIdentityConfig{
+				WorkloadPool: cs.WorkloadIdentityConfig.WorkloadPool,
+			}
+		}
+		if cs.AuthenticatorGroupConfig != nil {
+			cluster.AuthenticatorGroupsConfig = &containerpb.AuthenticatorGroupsConfig{
+				SecurityGroup: cs.AuthenticatorGroupConfig.SecurityGroups,
+			}
+		}
+		if cs.EnableLegacyAuthorization {
+			cluster.LegacyAbac = &containerpb.LegacyAbac{
+				Enabled: cs.EnableLegacyAuthorization,
+			}
+		}
+		if cs.IssueClientCertificate {
+			cluster.MasterAuth = &containerpb.MasterAuth{
+				ClientCertificateConfig: &containerpb.ClientCertificateConfig{
+					IssueClientCertificate: cs.IssueClientCertificate,
+				},
+			}
+		}
+
+	}
+	if s.scope.GCPManagedControlPlane.Spec.AddonsConfig != nil {
+		ca := s.scope.GCPManagedControlPlane.Spec.AddonsConfig
+		cluster.AddonsConfig = &containerpb.AddonsConfig{}
+		if ca.CloudRun {
+			cluster.AddonsConfig.CloudRunConfig = &containerpb.CloudRunConfig{
+				Disabled: !ca.CloudRun,
+			}
+		}
+		if ca.KalmConfig {
+			// TODO(akshay): Set KALM addon
+		}
+		if ca.GKEBackup {
+			cluster.AddonsConfig.GkeBackupAgentConfig = &containerpb.GkeBackupAgentConfig{
+				Enabled: ca.GKEBackup,
+			}
+		}
+		if ca.GCEPersistentDiskCsiDriver {
+			cluster.AddonsConfig.GcePersistentDiskCsiDriverConfig = &containerpb.GcePersistentDiskCsiDriverConfig{
+				Enabled: ca.GCEPersistentDiskCsiDriver,
+			}
+		}
+		if ca.GCPFileStoreCsiDriver {
+			cluster.AddonsConfig.GcpFilestoreCsiDriverConfig = &containerpb.GcpFilestoreCsiDriverConfig{
+				Enabled: ca.GCPFileStoreCsiDriver,
+			}
+		}
+		if ca.ImageStreaming {
+			// TODO(Akshay): Set Image streaming
+		}
+	}
+	if len(s.scope.GCPManagedControlPlane.Spec.DefaultNodeLocation) != 0 {
+		// TODO(Akshay): Set Default Node location
+
+	}
+	if s.scope.GCPManagedControlPlane.Spec.DefaultMaxPodsPerNode != 0 {
+		cluster.DefaultMaxPodsConstraint = &containerpb.MaxPodsConstraint{
+			MaxPodsPerNode: int64(s.scope.GCPManagedControlPlane.Spec.DefaultMaxPodsPerNode),
+		}
+	}
+	// TODO(Akshay): Set logging and monitoring
 	if !s.scope.IsAutopilotCluster() {
 		cluster.NodePools = scope.ConvertToSdkNodePools(nodePools, machinePools, isRegional, cluster.Name)
 	}
